@@ -1,0 +1,11 @@
+# Inputs and generated outputs are not part of this repository.
+data/
+output/
+logs/
+cyto/
+exp_data/
+*.rds
+__pycache__/
+*.pyc
+.Rhistory
+.RData
