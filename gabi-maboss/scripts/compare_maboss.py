@@ -44,12 +44,16 @@
 ##   delta CSV, and on a 160-module network the rest is a block of zeroes).
 ##   --fig-width/--fig-height size both figures; leaving the height off keeps the
 ##   heatmap's own height, which scales with how many rows it is drawing.
+##   --readouts MODULE [MODULE ...] draws exactly those modules in both graphs
+##   instead of the --top most-changed - e.g. only the modules a perturbation can
+##   reach. Printing and the delta CSV are unaffected. The filenames do not
+##   change, so point --plot at its own folder to keep the default graphs.
 ## Both write to gabi-maboss/output/maboss/ when given bare; name a folder to
 ## override. Nothing is written unless the flag is present - a plain run just prints.
 ##
 ## Usage:
 ##   python compare_maboss.py MODEL.bnet [MODEL.bnet ...] --compare NODE=ON|OFF ...
-##          [--name-map FILE] [--mutate NODE=ON|OFF ...] [--top N] [--noise-floor]
+##          [--name-map FILE] [--mutate NODE=ON|OFF ...] [--top N] [--readouts MODULE ...] [--noise-floor]
 ##          [--display-csv FILE] [--seed N] [--free-inputs]
 ##          [--plot [OUTDIR]] [--fig-width IN] [--fig-height IN] [--csv [OUTDIR]]
 ##          [--max-time T] [--sample-count N] [--threads N]
@@ -150,7 +154,7 @@ def _label(mod, tbl):
     return str(mod)
 
 
-def save_compare_plots(d, wt, tx, tbl, stem, outdir, top, width, height):
+def save_compare_plots(d, wt, tx, tbl, stem, outdir, top, width, height, readouts=None):
     """Write the two comparison graphs: paired trajectories, and a delta heatmap.
 
     Both are limited to the most-changed modules - the paired plot to `top`, the
@@ -163,6 +167,9 @@ def save_compare_plots(d, wt, tx, tbl, stem, outdir, top, width, height):
     sensible defaults: the paired plot is a fixed 6, while the heatmap's grows
     with its row count so the labels stay apart. An explicit --fig-height wins
     over both.
+
+    `readouts` (--readouts) replaces the most-changed selection in both graphs
+    with exactly the modules named, in the order given.
     """
     import matplotlib
     matplotlib.use("Agg")                          # headless: write files, no display
@@ -171,7 +178,15 @@ def save_compare_plots(d, wt, tx, tbl, stem, outdir, top, width, height):
 
     os.makedirs(outdir, exist_ok=True)
     written = []
-    sel = list(tbl.head(top).index)
+    if readouts:                                   # --readouts: exactly the modules named
+        missing = [m for m in readouts if m not in wt.columns]
+        if missing:
+            print(f"--readouts not in this model, skipped: {', '.join(missing)}")
+        sel = [m for m in readouts if m in wt.columns]
+        what = "selected"
+    else:                                          # default: the --top most-changed
+        sel = list(tbl.head(top).index)
+        what = "most-changed"
 
     ## 1. Wild-type vs treated for the most-changed modules. One colour per
     ## module, solid = wild-type and dashed = treated, so each pair reads as one
@@ -182,7 +197,7 @@ def save_compare_plots(d, wt, tx, tbl, stem, outdir, top, width, height):
         ax.plot(wt.index, wt[mod], color=colour, lw=1.6, label=_label(mod, tbl))
         ax.plot(tx.index, tx[mod], color=colour, lw=1.6, ls="--")
     ax.set_xlabel("time"); ax.set_ylabel("P(module = ON)"); ax.set_ylim(-0.02, 1.02)
-    ax.set_title(f"{stem}: {len(sel)} most-changed modules, wild-type vs treated")
+    ax.set_title(f"{stem}: {len(sel)} {what} modules, wild-type vs treated")
     ## Two legends stacked down the right margin. Both anchor to the TOP: the
     ## module legend used to be centred and the arms legend bottom-aligned, which
     ## collided as soon as --top made the module list tall enough to reach the
@@ -209,7 +224,7 @@ def save_compare_plots(d, wt, tx, tbl, stem, outdir, top, width, height):
     ## is a block of zeroes that also pushes the row count past the point where
     ## labels fit, leaving unreadable bands. Floor it at 40 so a small --top still
     ## gets the wider view the heatmap is for.
-    order = list(tbl.head(max(top, 40)).index)
+    order = sel if readouts else list(tbl.head(max(top, 40)).index)   # --readouts: same rows as above
     M = d[order].T
     labelled = len(order) <= 40                    # labels stop being legible past this
     ## Only reserve per-row height when the rows are actually labelled; otherwise
@@ -320,7 +335,7 @@ def run_one(bnet, args):
         print(f"-> {p}")
     if args.plot:
         for p in save_compare_plots(d, wt, tx, tbl, out_stem, args.plot, args.top,
-                                    args.fig_width, args.fig_height):
+                                    args.fig_width, args.fig_height, args.readouts):
             print(f"-> {p}")
     return True
 
@@ -343,6 +358,9 @@ def main(argv=None):
                              "only; repeatable for a combination")
     parser.add_argument("--top", type=int, default=12, metavar="N",
                         help="how many of the most-changed modules to print and plot (default 12)")
+    parser.add_argument("--readouts", nargs="+", default=None, metavar="MODULE",
+                        help="plot exactly these modules (module IDs) instead of the --top "
+                             "most-changed; printing and the delta CSV are unaffected")
     parser.add_argument("--noise-floor", action="store_true",
                         help="also run wild-type at a second seed and treat the largest "
                              "wild-type-vs-wild-type change as the floor below which a delta "
